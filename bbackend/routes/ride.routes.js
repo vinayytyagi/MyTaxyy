@@ -1,7 +1,7 @@
 const express=require('express');
 const router=express.Router();
 const {body,query}=require('express-validator');
-const rideController=require('../controllers/ride.contoller');
+const rideController=require('../controllers/ride.controller');
 const authMiddleware=require('../middlewares/auth.middleware');
 const rideModel = require('../models/ride.model');
 
@@ -32,6 +32,46 @@ router.post('/end-ride',
     body('rideId').isMongoId().withMessage('Invalid ride id'),
     rideController.endRide
 )
+
+// Add cash payment confirmation endpoint
+router.post('/:rideId/cash-payment',
+    authMiddleware.authCaptain,
+    body('rideId').isMongoId().withMessage('Invalid ride id'),
+    async (req, res) => {
+        try {
+            const { rideId } = req.params;
+            const ride = await rideModel.findById(rideId);
+            
+            if (!ride) {
+                return res.status(404).json({ message: 'Ride not found' });
+            }
+
+            // Update ride payment status
+            await rideModel.findByIdAndUpdate(rideId, {
+                paymentStatus: 'completed',
+                paymentMethod: 'cash'
+            });
+
+            // Notify user about cash payment confirmation
+            if (ride.user && ride.user.socketId) {
+                sendMessageToSocketId(ride.user.socketId, {
+                    event: 'payment_completed',
+                    data: {
+                        rideId: ride._id,
+                        amount: ride.fare,
+                        paymentMethod: 'cash'
+                    }
+                });
+            }
+
+            res.json({ success: true, message: 'Cash payment confirmed' });
+        } catch (error) {
+            console.error('Error confirming cash payment:', error);
+            res.status(500).json({ message: 'Error confirming cash payment' });
+        }
+    }
+);
+
 router.get('/active', authMiddleware.authUser, rideController.getActiveRideForUser);
 router.get('/history', authMiddleware.authUser, rideController.getRideHistory);
 router.get('/captain/history', authMiddleware.authCaptain, rideController.getCaptainRideHistory);
@@ -52,10 +92,14 @@ router.get('/available', authMiddleware.authCaptain, async (req, res) => {
         // 1. Not completed
         // 2. Not cancelled
         // 3. Not already assigned to another captain
+        // 4. Not ignored by the current captain
         const availableRides = await rideModel.find({
             status: { $in: ['pending', 'accepted'] },
-            captain: { $exists: false }
-        }).sort({ createdAt: -1 });
+            captain: { $exists: false },
+            ignoredBy: { $nin: [captainId] }
+        })
+        .populate('user', 'fullname profilePhoto')
+        .sort({ createdAt: -1 });
 
         res.json({ rides: availableRides });
     } catch (error) {

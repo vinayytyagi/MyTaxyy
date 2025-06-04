@@ -90,4 +90,15 @@ router.post('/profile/photo',
     captainController.uploadProfilePhoto
 );
 
+// Daily stats routes
+router.get('/daily-stats', authMiddleware.authCaptain, captainController.getDailyStats);
+router.post('/reset-daily-stats', authMiddleware.authCaptain, captainController.resetDailyStats);
+
+// Add route for ignoring a ride
+router.post('/ignore-ride',
+    authMiddleware.authCaptain,
+    body('rideId').isMongoId().withMessage('Invalid ride ID'),
+    captainController.ignoreRide
+);
+
 module.exports=router;

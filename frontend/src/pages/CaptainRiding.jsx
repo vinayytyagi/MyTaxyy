@@ -6,6 +6,8 @@ import gsap from 'gsap';
 import LiveTracking from '../../components/LiveTracking';
 import { SocketContext } from '../context/SocketContext';
 import axios from 'axios';
+import { toast } from 'react-hot-toast';
+import myTaxyLogo from '../assets/myTaxy.png';
 
 const CaptainRiding = () => {
     const [finishRidePanel, setFinishRidePanel] = useState(false);
@@ -14,11 +16,14 @@ const CaptainRiding = () => {
     const [showPaymentSuccess, setShowPaymentSuccess] = useState(false);
     const finishRidePanelRef = useRef(null);
     const location = useLocation();
-    const rideData = location.state?.ride;
+    const [rideData, setRideData] = useState(location.state?.ride);
     const { socket } = useContext(SocketContext);
     const navigate = useNavigate();
     const watchPositionId = useRef(null);
     const socketInitialized = useRef(false);
+    const [totalEarnings, setTotalEarnings] = useState(0);
+    const [showDetailsButton, setShowDetailsButton] = useState(true);
+    const [mapType, setMapType] = useState('roadmap');
 
     // Format ride data for LiveTracking component
     const [formattedRideData, setFormattedRideData] = useState(null);
@@ -43,59 +48,45 @@ const CaptainRiding = () => {
     useEffect(() => {
         if (!socket || !rideData) return;
 
-        const handlePaymentSuccess = async (data) => {
-            console.log('Received payment-successful event:', data);
+        const handlePaymentCompleted = async (data) => {
+            console.log('Received payment-completed event in CaptainRiding:', data);
             if (data.rideId === rideData._id) {
-                try {
-                    console.log('Payment successful for current ride');
-                    setShowPaymentSuccess(true);
-                    
-                    const token = localStorage.getItem('captainToken');
-                    if (token) {
-                        console.log('Completing ride...');
-                        await axios.post(
-                            `${import.meta.env.VITE_BASE_URL}/rides/end-ride`,
-                            { rideId: rideData._id },
-                            {
-                                headers: {
-                                    Authorization: `Bearer ${token}`
-                                }
-                            }
-                        );
-                        console.log('Ride completed successfully');
-                    }
-
-                    setTimeout(() => {
-                        console.log('Redirecting to home...');
-                        navigate('/captain-home');
-                    }, 2000);
-                } catch (error) {
-                    console.error('Error completing ride:', error);
-                }
+                console.log('Payment completed for current ride. Updating state.');
+                // Update the rideData state with the new payment status
+                setRideData(prevRideData => ({
+                    ...prevRideData,
+                    paymentStatus: 'completed', // Assuming the event confirms completion
+                    paymentMethod: data.paymentMethod // Update payment method from event data
+                }));
+                        
+                // The setShowPaymentSuccess(true) and automatic ride completion logic 
+                // based on payment success from the previous implementation seems a bit aggressive.
+                // We should let the captain manually complete the ride after payment is received.
+                // Removing the automatic completion and success modal here.
+                toast.success('Payment received! You can now complete the ride.');
             }
         };
 
-        // Only set up listeners once
-        if (!socketInitialized.current) {
-            console.log('Setting up socket listeners for ride:', rideData._id);
-            
-            socket.on('payment-successful', handlePaymentSuccess);
-            
-            // Join ride-specific room
-            socket.emit('join-ride', { rideId: rideData._id });
-            
-            socketInitialized.current = true;
-        }
+        // The original handlePaymentSuccess listener seems to trigger automatic ride completion
+        // which might not be desired. Let's keep the payment_completed listener as the primary 
+        // way to update payment status.
+        // socket.on('payment-successful', handlePaymentSuccess); // Removing this listener
 
-        // Cleanup function
+        // We can keep the ride-ended listener if needed for other reasons
+        // socket.on('ride-ended', handleRideEnded);
+
+        // Add the payment_completed listener
+        socket.on('payment_completed', handlePaymentCompleted);
+
+        // Cleanup listeners on unmount
         return () => {
-            if (socketInitialized.current) {
-                console.log('Cleaning up socket listeners for ride:', rideData._id);
-                socket.off('payment-successful');
-                socketInitialized.current = false;
-            }
+            console.log('Cleaning up CaptainRiding socket listeners');
+            socket.off('payment_completed', handlePaymentCompleted);
+            // socket.off('payment-successful'); // Also remove this if it was there
+            // socket.off('ride-ended');
         };
-    }, [socket, rideData, navigate]);
+
+    }, [socket, rideData]); // Depend on socket and rideData
 
     // Watch driver position and send updates to server
     useEffect(() => {
@@ -178,51 +169,81 @@ const CaptainRiding = () => {
     }, [finishRidePanel]);
 
   return (
-    <div className='h-screen'>
-        <div className='fixed p-4 top-0 flex items-center justify-between w-screen'>
-                <img className='w-16' src="https://cdn.worldvectorlogo.com/logos/uber-2.svg" />
-                <Link to='/captain-home' className='fixed right-2 top-2 h-10 w-10 bg-white flex items-center justify-center rounded-full'>
-            <i className="text-xl ri-logout-box-r-line"></i>
-            </Link>
+    <div className="relative w-full">
+        {/* Header - Consistent with Home page */}
+        <div className='fixed px-6 py-2 top-0 flex items-center justify-between w-screen z-50 bg-white/10 backdrop-blur-xs shadow-sm'>
+            <div
+                className="flex items-center gap-2 cursor-pointer"
+                onClick={() => navigate('/captain-home')}
+            >
+                <img className='w-12 h-12' src={myTaxyLogo} alt="MyTaxy"/>
+                <span className="text-2xl font-bold text-gray-900">MyTaxy</span>
+            </div>
+            <div className="flex items-center space-x-3">
+                {/* Map Type Toggle Button */}
+                <button 
+                    onClick={() => setMapType(prev => prev === 'hybrid' ? 'roadmap' : 'hybrid')}
+                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer'
+                    title={mapType === 'hybrid' ? 'Switch to Map View' : 'Switch to Satellite View'}
+                >
+                    <i className={`text-xl ri-${mapType === 'hybrid' ? 'map-2-line' : 'earth-line'}`}></i>
+                </button>
+                {/* Call User Button */}
+                <button 
+                    onClick={() => window.location.href = `tel:${rideData?.user?.phone}`}
+                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer'
+                    title="Call User"
+                >
+                    <i className="text-xl ri-phone-line"></i>
+                </button>
+                {/* Back to Captain Home Button */}
+                <button 
+                    onClick={() => navigate('/captain-home')}
+                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer'
+                    title="Back to Home"
+                >
+                    <i className="text-xl ri-home-5-line"></i>
+                </button>
+                {/* Logout Button */}
+                <button 
+                    onClick={() => {
+                        if (socket) {
+                            socket.disconnect();
+                        }
+                        navigate('/captain-login');
+                    }}
+                    className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer'
+                    title="Logout"
+                >
+                    <i className="text-xl ri-logout-box-r-line"></i>
+                </button>
+            </div>
         </div>
-        <div className='h-4/5'>
+        {/* Full screen map */}
+        <div className='fixed inset-0 z-0'>
                 {formattedRideData && (
                     <LiveTracking rideData={formattedRideData} />
                 )}
         </div>
-            <div className='h-1/5 p-6 bg-yellow-400 flex justify-between items-center relative'
-                onClick={() => {
-            setFinishRidePanel(true);
-           }} >
-            <h5 className='p-1 text-center w-[90%] absolute top-0' 
-                    onClick={() => {
 
-                    }}><i className="text-2xl text-gray-800 ri-arrow-up-wide-fill"></i></h5>
-                <h4 className='text-xl font-semibold'>{distanceToDestination}</h4>
+        {/* Floating Show Details/Complete Ride Button */}
+        {showDetailsButton && !finishRidePanel && (
                 <button 
-                    className='bg-green-600 text-white font-semibold p-3 px-10 rounded-lg'
-                    onClick={completeRide}
+                className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-[#fdc700] text-gray-900 font-semibold px-8 py-3 rounded-full shadow-lg text-lg z-50 hover:bg-yellow-400 transition-all"
+                onClick={() => setFinishRidePanel(true)}
                 >
-                    Complete Ride
+                <i className="ri-information-line mr-2"></i>
+                Show Details
                 </button>
-        </div>
-            <div ref={finishRidePanelRef} className='fixed w-full z-10 bottom-0 translate-y-full px-3 py-6 pt-12 bg-white'>
+        )}
+
+        {/* Complete Ride Panel (FinishRide) */}
+        {finishRidePanel && (
+            <div ref={finishRidePanelRef} className="fixed inset-x-0 bottom-0 z-50" style={{transition: 'transform 0.4s cubic-bezier(0.4,0,0.2,1)'}}>
               <FinishRide 
               ride={rideData}
-                    setFinishRidePanel={setFinishRidePanel} />
-        </div>
-
-        {/* Payment Success Notification */}
-        {showPaymentSuccess && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white p-8 rounded-lg shadow-lg max-w-md w-full text-center">
-                    <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <i className="ri-check-line text-3xl text-green-600"></i>
-                    </div>
-                    <h2 className="text-2xl font-semibold mb-2">Payment Successful!</h2>
-                    <p className="text-gray-600 mb-4">Ride completed successfully.</p>
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto"></div>
-                </div>
+                    setFinishRidePanel={setFinishRidePanel}
+                />
             </div>
         )}
     </div>

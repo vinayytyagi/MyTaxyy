@@ -1,11 +1,15 @@
-const socketIo= require('socket.io');
-const userModel=require('./models/user.model');
-const captainModel=require('./models/captain.model');
+// Socket.io implementation for real-time communication between users, captains, and the server
+// This file handles all real-time events like ride requests, location updates, and ride status changes
+
+const socketIo = require('socket.io');
+const userModel = require('./models/user.model');
+const captainModel = require('./models/captain.model');
 const rideModel = require('./models/ride.model');
 
 let io;
 
-function initializeSocket(server){
+function initializeSocket(server) {
+    // Configure CORS for socket.io to allow connections from frontend
     const corsOptions = {
         origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['https://mytaxy.vercel.app', 'http://localhost:5173'],
         methods: process.env.CORS_METHODS ? process.env.CORS_METHODS.split(',') : ['GET', 'POST'],
@@ -13,55 +17,58 @@ function initializeSocket(server){
         allowedHeaders: process.env.CORS_ALLOWED_HEADERS ? process.env.CORS_ALLOWED_HEADERS.split(',') : ['Content-Type', 'Authorization']
     };
 
-    io=socketIo(server,{
+    // Initialize socket.io with the server
+    io = socketIo(server, {
         cors: corsOptions
     });
-    io.on("connection",(socket)=>{
+
+    // Handle new client connections
+    io.on("connection", (socket) => {
         console.log(`Client connected:${socket.id}`);
 
+        // When a user or captain joins the app
+        socket.on('join', async (data) => {
+            const { userId, userType } = data;
+            console.log(`User ${userId} joined as ${userType}`);
+            
+            // Update user's socket ID in database for real-time communication
+            if (userType === "user") {
+                await userModel.findByIdAndUpdate(userId, { socketId: socket.id });
+            } 
+            // Update captain's socket ID and status
+            else if (userType === "captain") {
+                await captainModel.findByIdAndUpdate(userId, {
+                    socketId: socket.id,
+                    status: 'active'
+                });
 
-       socket.on('join',async(data)=>{
-        const{userId,userType}=data;
-        console.log(`User ${userId} joined as ${userType}`);
-        if(userType==="user"){
-            await userModel.findByIdAndUpdate(userId,{socketId:socket.id});
-        }else if(userType==="captain"){
-            await captainModel.findByIdAndUpdate(userId,{
-                socketId: socket.id,
-                status: 'active'
-            });
+                // Send available rides to newly connected captain
+                try {
+                    const availableRides = await rideModel.find({
+                        status: { $in: ['pending', 'accepted'] },
+                        captain: { $exists: false }
+                    })
+                    .select('+distance +duration')
+                    .sort({ createdAt: -1 });
 
-            // Send all available rides to the new captain
-            try {
-                const availableRides = await rideModel.find({
-                    status: { $in: ['pending', 'accepted'] },
-                    captain: { $exists: false }
-                })
-                .select('+distance +duration') // Explicitly select distance and duration
-                .sort({ createdAt: -1 });
-
-                if (availableRides.length > 0) {
-                    console.log(`Sending ${availableRides.length} available rides to new captain ${userId}`);
-                    console.log('Sample ride data:', {
-                        id: availableRides[0]._id,
-                        distance: availableRides[0].distance,
-                        duration: availableRides[0].duration
-                    });
-                    socket.emit('available-rides', availableRides);
+                    if (availableRides.length > 0) {
+                        socket.emit('available-rides', availableRides);
+                    }
+                } catch (error) {
+                    console.error('Error fetching available rides for new captain:', error);
                 }
-            } catch (error) {
-                console.error('Error fetching available rides for new captain:', error);
             }
-        }
-       });
+        });
 
-       socket.on('update-location-captain', async (data) => {
+        // Handle captain location updates for live tracking
+        socket.on('update-location-captain', async (data) => {
             const { userId, location } = data;
 
             if (!location || !location.ltd || !location.lng) {
                 return socket.emit('error', { message: 'Invalid location data' });
             }
 
+            // Update captain's location in database
             await captainModel.findByIdAndUpdate(userId, {
                 location: {
                     type: 'Point',
@@ -71,7 +78,7 @@ function initializeSocket(server){
             });
         });
 
-        // Handle driver location update for live tracking
+        // Handle driver location updates during active rides
         socket.on('driver-location-update', (data) => {
             const { rideId, location } = data;
             
@@ -79,12 +86,11 @@ function initializeSocket(server){
                 return socket.emit('error', { message: 'Invalid driver location data' });
             }
             
-            // Broadcast the driver location to all clients tracking this ride
+            // Broadcast driver location to all clients tracking this ride
             io.emit(`driverLocation:${rideId}`, location);
-            console.log(`Driver location updated for ride ${rideId}:`, location);
         });
 
-        // Handle clients joining a specific ride room
+        // Handle clients joining a specific ride room for real-time updates
         socket.on('join-ride', (data) => {
             const { rideId } = data;
             
@@ -93,10 +99,9 @@ function initializeSocket(server){
             }
             
             socket.join(`ride:${rideId}`);
-            console.log(`Client ${socket.id} joined ride room: ride:${rideId}`);
         });
 
-        // Handle ride requests with vehicle type matching
+        // Handle new ride requests
         socket.on('request-ride', async (data) => {
             const { rideId, pickup, destination, vehicleType } = data;
             
@@ -105,9 +110,6 @@ function initializeSocket(server){
             }
 
             try {
-                // Map 'moto' to 'motorcycle' for database query
-                const dbVehicleType = vehicleType === 'moto' ? 'motorcycle' : vehicleType;
-
                 // Find nearby captains with matching vehicle type
                 const nearbyCaptains = await captainModel.find({
                     'location': {
@@ -119,7 +121,7 @@ function initializeSocket(server){
                             $maxDistance: 5000 // 5km radius
                         }
                     },
-                    'vehicle.vehicleType': dbVehicleType,
+                    'vehicle.vehicleType': vehicleType === 'moto' ? 'motorcycle' : vehicleType,
                     isAvailable: true
                 }).limit(5);
 
@@ -140,15 +142,13 @@ function initializeSocket(server){
                         });
                     }
                 });
-
-                console.log(`Ride request sent to ${nearbyCaptains.length} ${vehicleType} captains for ride ${rideId}`);
             } catch (error) {
                 console.error('Error finding nearby captains:', error);
                 socket.emit('error', { message: 'Error finding nearby captains' });
             }
         });
 
-        // Add new handler for ride acceptance
+        // Handle ride acceptance by captain
         socket.on('ride-accepted', async (data) => {
             const { rideId } = data;
             
@@ -162,49 +162,58 @@ function initializeSocket(server){
                     status: 'accepted'
                 });
 
-                // Broadcast to ALL captains that this ride is no longer available
+                // Notify all captains that this ride is no longer available
                 io.emit('ride-no-longer-available', { 
                     rideId,
                     message: 'Ride has been accepted by another captain'
                 });
-                
-                console.log(`Ride ${rideId} accepted, notifying all captains`);
             } catch (error) {
                 console.error('Error handling ride acceptance:', error);
             }
         });
 
-        socket.on('payment-successful', async (data) => {
+        // Handle payment success notification
+        socket.on('payment_successful', async (data) => {
             try {
-                console.log('Received payment-successful event:', data);
-                const { rideId, captainId } = data;
+                const { rideId, captainId, amount } = data;
                 
-                // Get captain's socket ID
+                // Get captain's socket ID and update their earnings
                 const captain = await captainModel.findById(captainId);
-                console.log('Found captain:', captain?.socketId);
-                
-                if (captain && captain.socketId) {
-                    // Update ride status to completed
-                    await rideModel.findByIdAndUpdate(rideId, {
-                        status: 'completed'
-                    });
-                    
-                    // Emit to ride-specific room
-                    io.to(`ride:${rideId}`).emit('payment-successful', {
+                if (!captain) {
+                    console.error('Captain not found:', captainId);
+                    return;
+                }
+
+                // Update captain's earnings
+                captain.earnings = (captain.earnings || 0) + amount;
+                await captain.save();
+
+                // Send payment success notification to captain
+                if (captain.socketId) {
+                    io.to(captain.socketId).emit('payment_received', {
                         rideId,
-                        captainId,
-                        message: 'Payment successful! Ride completed.'
+                        amount,
+                        timestamp: new Date(),
+                        message: `Payment of ₹${amount} received successfully!`
                     });
-                    
-                    console.log('Payment success notification sent to ride room:', rideId);
+
+                    // Also update captain's earnings in real-time
+                    io.to(captain.socketId).emit('earnings_updated', {
+                        amount,
+                        totalEarnings: captain.earnings
+                    });
+
+                    console.log('Payment notification sent to captain:', captainId);
                 } else {
-                    console.log('Captain not found or no socket ID');
+                    console.error('Captain socket ID not found:', captainId);
                 }
             } catch (error) {
-                console.error('Error handling payment success:', error);
+                console.error('Error handling payment notification:', error);
+                socket.emit('error', { message: 'Error processing payment notification' });
             }
         });
 
+        // Handle client disconnection
         socket.on("disconnect", async () => {
             console.log(`Client disconnected:${socket.id}`);
             // Set captain status to inactive on disconnect
@@ -216,30 +225,25 @@ function initializeSocket(server){
     });
 }
 
-function sendMessageToSocketId(socketId,messageObject){
-    console.log(`Sending message to ${socketId}`,messageObject);
-    if(io){
+// Helper function to send messages to specific socket IDs
+function sendMessageToSocketId(socketId, messageObject) {
+    if (io) {
         try {
-            io.to(socketId).emit(messageObject.event,messageObject.data);
-            console.log(`Message sent successfully to ${socketId}`);
+            io.to(socketId).emit(messageObject.event, messageObject.data);
         } catch (error) {
             console.error(`Error sending message to ${socketId}:`, error);
         }
-    }else{
-        console.error("Socket.io not initialized");
     }
 }
 
-// Function to broadcast driver location updates
+// Helper function to broadcast driver location updates
 function broadcastDriverLocation(rideId, location) {
     if (io) {
         io.emit(`driverLocation:${rideId}`, location);
-    } else {
-        console.error("Socket.io not initialized");
     }
 }
 
-module.exports={
+module.exports = {
     initializeSocket,
     sendMessageToSocketId,
     broadcastDriverLocation

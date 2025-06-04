@@ -2,50 +2,100 @@ import React from 'react'
 
 const LookingForDriver = (props) => {
   return (
-    <div>
-      <div className="w-full h-2 rounded-sm bg-gray-200 overflow-hidden">
-        <div className="w-full h-full bg-green-500 animate-loading"></div>
-      </div>
-      <h5 className='p-1 text-center w-[93%] absolute top-0' onClick={() => {
-        props.setVehicleFound(false)
-      }}><i className="text-3xl text-gray-200 ri-arrow-down-wide-line"></i></h5>
-      <h3 className='text-2xl font-semibold mb-5'>Looking for a Driver</h3>
+    <div className="relative p-4">
+      {/* Close Button */}
+      <button 
+        onClick={() => props.setVehicleFound(false)}
+        className="absolute top-2 right-4 p-2 text-gray-400 hover:text-gray-600 transition-colors"
+      >
+        {/* <i className="ri-close-line text-2xl"></i> */}
+      </button>
 
-      <div className='flex gap-2 justify-between flex-col items-center'>
-        <img className='h-20' src="https://swyft.pl/wp-content/uploads/2023/05/how-many-people-can-a-uberx-take.jpg" alt="" />
-        <div className='w-full mt-5'>
-          <div className='flex items-center gap-5 px-1 py-3 border-b-2'>
-            <i className="ri-map-pin-user-fill text-3xl"></i>
-            <div>
-              <h3 className='text-lg font-semibold'>Pickup</h3>
-              <p className='text-sm -mt-1 text-gray-600'>{props.pickup}</p>
+      {/* Header */}
+      <div className="text-center mb-6">
+        <div className="inline-flex items-center justify-center w-12 h-12 bg-[#fdc700] rounded-full mb-3">
+          <i className={`ri-${props.ride?.otp ? 'user-search-line' : 'search-line'} text-2xl text-white`}></i>
+        </div>
+        <h3 className="text-2xl font-semibold text-gray-900">
+          {props.ride?.otp ? 'Driver Found!' : 'Finding a Driver...'}
+        </h3>
+        <p className="text-gray-500 mt-1">
+          {props.ride?.otp ? 'Your driver is on the way' : 'Please wait while we connect you with a driver'}
+        </p>
+      </div>
+
+      {/* Progress Bar */}
+      {!props.ride?.otp && (
+        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mb-6">
+          <div className="w-full h-full bg-[#fdc700] animate-loading"></div>
+        </div>
+      )}
+
+      {/* OTP Card */}
+      <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+        <div className="flex flex-col items-center">
+          {/* OTP Icon */}
+          <div className="relative mb-4">
+            <div className="absolute inset-0 bg-gray-200 rounded-full opacity-20 animate-pulse"></div>
+            <div className="relative rounded-full p-4">
+              <i className="ri-shield-keyhole-line text-3xl text-[#fdc700]"></i>
             </div>
           </div>
-          <div className='flex items-center gap-5 px-1 py-3 border-b-2'>
-            <i className="ri-map-pin-2-fill text-3xl"></i>
-            <div>
-              <h3 className='text-lg font-semibold'>Destination</h3>
-              <p className='text-sm -mt-1 text-gray-600'>{props.destination}</p>
+
+          {/* OTP Status */}
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            {props.ride?.otp ? 'Your Ride OTP' : 'Waiting for Driver'}
+          </h3>
+
+          {/* OTP Display */}
+          <div className="w-full bg-gray-50 rounded-lg p-4">
+            <div className="flex justify-center items-center gap-2">
+              {[1, 2, 3, 4, 5, 6].map((_, index) => (
+                <div 
+                  key={index}
+                  className={`w-12 h-12 rounded-lg flex items-center justify-center text-2xl font-bold transition-all duration-300 ${
+                    props.ride?.otp 
+                      ? 'bg-[#fdc700] text-black shadow-md' 
+                      : 'bg-gray-200 animate-pulse'
+                  }`}
+                  style={props.ride?.otp ? { animationDelay: `${index * 0.1}s` } : {}}
+                >
+                  {props.ride?.otp ? props.ride.otp[index] : ''}
+                </div>
+              ))}
             </div>
           </div>
-          <div className='flex items-center gap-5 px-1 py-3 border-b-2'>
-            <i className="ri-currency-line text-3xl"></i>
-            <div>
-              <h3 className='text-lg font-semibold'>₹{props.fare[ props.vehicleType ]} </h3>
-              <p className='text-sm -mt-1 text-gray-600'>Cash</p>
-            </div>
-          </div>
-          <div className='flex items-center gap-5 px-1 py-3'>
-            <i className="ri-shield-keyhole-line text-3xl"></i>
-            <div>
-              <h3 className='text-lg font-semibold'>OTP</h3>
-              <p className='text-sm -mt-1 text-gray-600'>{props.ride?.otp}</p>
-            </div>
-          </div>
+
+          {/* OTP Instructions */}
+          <p className="text-gray-500 text-sm mt-4 text-center">
+            {props.ride?.otp 
+              ? 'Share this OTP with your driver to start the ride'
+              : 'OTP will be shown when driver accepts your ride'
+            }
+          </p>
         </div>
       </div>
-    </div>
-  )
-}
 
-export default LookingForDriver
+      {/* Ride Info Card */}
+      {/* <div className="bg-[#fdc700] rounded-xl p-4 shadow-lg">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 bg-white/20 rounded-full flex items-center justify-center">
+              <i className="ri-route-line text-2xl text-white"></i>
+            </div>
+            <div>
+              <p className="text-white/90 text-sm">Estimated Arrival</p>
+              <p className="text-white font-semibold">2-3 minutes</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="text-white/90 text-sm">Ride Fare</p>
+            <p className="text-white font-semibold">₹{props.ride?.fare || '0'}</p>
+          </div>
+        </div>
+      </div> */}
+    </div>
+  );
+};
+
+export default LookingForDriver;

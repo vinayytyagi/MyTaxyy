@@ -4,6 +4,7 @@ import { UserDataContext } from '../context/UserContext';
 import { userLogin, setToken, userRegister } from '../services/auth.service';
 import { toast } from 'react-toastify';
 import axios from 'axios';
+import myTaxyLogo from '../assets/MyTaxy.png';
 
 const UserLogin = () => {
     //we use this for data handling in react calle two way binding 
@@ -12,6 +13,7 @@ const UserLogin = () => {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [isLoadingGuest, setIsLoadingGuest] = useState(false);
     // const [userData,setUserData]=useState({});
 
     const { setUser } = useContext(UserDataContext);
@@ -43,7 +45,7 @@ const UserLogin = () => {
 
     const handleGuestLogin = async () => {
         setError('');
-        setIsLoading(true);
+        setIsLoadingGuest(true);
 
         try {
             // First try to login with test credentials
@@ -92,74 +94,121 @@ const UserLogin = () => {
                 setError(errorMessage);
             }
         } finally {
-            setIsLoading(false);
+            setIsLoadingGuest(false);
         }
     };
 
-  return (
-    <div className='p-7 h-screen flex flex-col justify-between'>
-       <div>
-       <img className='w-16 mb-10' src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.png" alt="" />
-        <form onSubmit={handleSubmit}>
-            <h3 className='text-lg font-medium mb-2'>What's your email</h3>
-
-            <input
-             value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-             required
-             className='bg-[#eeeeee] mb-7 px-4 py-2 rounded border w-full text-lg placeholder:text-base'
-             type="email" 
-             placeholder='example@gmail.com'
-                        disabled={isLoading}
-                        autoComplete="email"
-                    />
-
-            <h3 className='text-lg font-medium mb-2'>Enter Password</h3>
-
-            <input 
-             value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-            required 
-            className='bg-[#eeeeee] mb-7 px-4 py-2 rounded border w-full text-lg placeholder:text-base'
-            type="password"
-            placeholder='password'
-                        disabled={isLoading}
-                        autoComplete="current-password"
-                    />
-
-            {error && (
-                <div className="text-red-500 text-sm mb-4 text-center">
-                    {error}
+    return (
+        <div className='min-h-screen bg-gray-50 flex flex-col'>
+            {/* Header */}
+            <div className='fixed px-6 py-2 top-0 flex items-center justify-between w-screen z-50 bg-white/10 backdrop-blur-xs shadow-sm'>
+                <div 
+                    className="flex items-center gap-2 cursor-pointer"
+                    onClick={() => navigate('/login')}
+                >
+                    <img className='w-12 h-12' src={myTaxyLogo} alt="MyTaxy Logo"/>
+                    <span className="text-2xl font-bold text-gray-900">MyTaxy</span>
                 </div>
-            )}
+            </div>
 
-            <button
-            type="submit"
-            className='bg-[#111] text-white font-semibold mb-3 px-4 py-2 rounded w-full text-lg placeholder:text-base disabled:opacity-50'
-            disabled={isLoading}
-            >
-                {isLoading ? 'Logging in...' : 'Login'}
-            </button>
+            {/* Main Content */}
+            <div className='flex-1 flex items-center justify-center p-6 mt-20'>
+                <div className='w-full max-w-md'>
+                    <div className='bg-white rounded-2xl shadow-lg p-8'>
+                        <div className="flex items-center justify-center gap-2 mb-6">
+                            <i className="ri-user-line text-4xl text-[#fdc700]"></i>
+                            <h2 className='text-2xl font-bold text-gray-800 text-center'>Welcome Back!</h2>
+                        </div>
+                        
+                        <form onSubmit={handleSubmit} className='space-y-6'>
+                            <div>
+                                <label className='block text-sm font-medium text-gray-700 mb-2'>
+                                    Email Address <span className="text-gray-400">*</span>
+                                </label>
+                                <input
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required
+                                    className='bg-gray-50 px-4 py-3 text-lg rounded-xl w-full border border-gray-200 focus:border-[#fdc700] focus:ring-2 focus:ring-[#fdc700]/20 outline-none transition-all shadow-sm cursor-text'
+                                    type="email" 
+                                    placeholder='example@gmail.com'
+                                    disabled={isLoading || isLoadingGuest}
+                                    autoComplete="email"
+                                />
+                            </div>
 
-            <button
-            type="button"
-            onClick={handleGuestLogin}
-            className='bg-[#666] text-white font-semibold mb-3 px-4 py-2 rounded w-full text-lg placeholder:text-base disabled:opacity-50'
-            disabled={isLoading}
-            >
-                {isLoading ? 'Logging in...' : 'Login as Guest User'}
-            </button>
+                            <div>
+                                <label className='block text-sm font-medium text-gray-700 mb-2'>
+                                    Password <span className="text-gray-400">*</span>
+                                </label>
+                                <input 
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    required 
+                                    className='bg-gray-50 px-4 py-3 text-lg rounded-xl w-full border border-gray-200 focus:border-[#fdc700] focus:ring-2 focus:ring-[#fdc700]/20 outline-none transition-all shadow-sm cursor-text'
+                                    type="password"
+                                    placeholder='Enter your password'
+                                    disabled={isLoading || isLoadingGuest}
+                                    autoComplete="current-password"
+                                />
+                            </div>
 
-                    <p className='text-center'>New here? <Link to='/signup' className='text-blue-600'>Create new Account</Link></p>
-        </form>
-       </div>
-       <div>
-            <Link to='/captain-login'
-                className='bg-[#10b461] flex items-center justify-center text-white font-semibold mb-7 px-4 py-2 rounded w-full text-lg placeholder:text-base'
-            >Sign in as Captain</Link> 
-       </div>
-    </div>
-  )
+                            {error && (
+                                <div className="text-red-500 text-sm text-center bg-red-50 p-3 rounded-lg">
+                                    {error}
+                                </div>
+                            )}
+
+                            <button
+                                type="submit"
+                                className='bg-[#fdc700] text-gray-800 font-semibold px-4 py-3 rounded-xl w-full text-lg transition-all shadow-sm hover:bg-[#fdc700]/90 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer'
+                                disabled={isLoading || isLoadingGuest}
+                            >
+                                {isLoading ? (
+                                    <div className="flex items-center justify-center">
+                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-800 border-t-transparent mr-2"></div>
+                                        Logging in...
+                                    </div>
+                                ) : 'Login'}
+                            </button>
+
+                            <button
+                                type="button"
+                                onClick={handleGuestLogin}
+                                className='bg-gray-100 text-gray-700 font-semibold px-4 py-3 rounded-xl w-full text-lg transition-all shadow-sm hover:bg-gray-200 hover:shadow-md active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed border border-gray-200 cursor-pointer'
+                                disabled={isLoading || isLoadingGuest}
+                            >
+                                {isLoadingGuest ? (
+                                    <div className="flex items-center justify-center">
+                                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-700 border-t-transparent mr-2"></div>
+                                        Logging in...
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center justify-center">
+                                        <i className="ri-user-line mr-2"></i>
+                                        Continue as Guest
+                                    </div>
+                                )}
+                            </button>
+
+                            <p className='text-center text-gray-600'>
+                                New here? <Link to='/signup' className='text-[#fdc700] font-semibold hover:text-[#fdc700]/90 cursor-pointer'>Create new Account</Link>
+                            </p>
+                        </form>
+                    </div>
+
+                    <div className='mt-6'>
+                        <Link to='/captain-login'
+                            className='bg-gray-800 text-white font-semibold px-4 py-3 rounded-xl w-full text-lg transition-all shadow-sm hover:bg-gray-800 hover:shadow-md active:scale-[0.98] flex items-center justify-center cursor-pointer'
+                        >
+                            <i className="ri-steering-2-line mr-2"></i>
+                            Sign in as Captain
+                        </Link>
+                    </div>
+                </div>
+            </div>
+        </div>
+    )
 }
 
 export default UserLogin

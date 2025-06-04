@@ -1,5 +1,5 @@
 import React, { useRef,useState,useContext,useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import CaptainDetails from '../../components/CaptainDetails'
 import RidePopUp from '../../components/RidePopUp'
 import { useGSAP } from '@gsap/react'
@@ -27,6 +27,11 @@ const CaptainHome = () => {
 const [ride, setRide] = useState(null);
   const { socket } = useContext(SocketContext);
   const { captain } = useContext(CaptainDataContext);
+  const navigate = useNavigate();
+  const dropdownRef = useRef(null);
+  const [mapType, setMapType] = useState(() => {
+    return localStorage.getItem('captainMapType') || 'hybrid';
+  });
 
 //   here we find the captain location and send it to the backend
 
@@ -151,6 +156,56 @@ useEffect(() => {
     }
 }, [socket, ride, availableRides]);
 
+// On mount, check for ongoing ride in localStorage
+useEffect(() => {
+    const ongoingRide = localStorage.getItem('ongoingRide');
+    if (ongoingRide) {
+        const rideObj = JSON.parse(ongoingRide);
+        // Fetch latest ride status from backend
+        const fetchRideStatus = async () => {
+            try {
+                const token = getToken('captain');
+                if (!token) return;
+                const response = await axios.get(`${import.meta.env.VITE_BASE_URL}/rides/${rideObj._id}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const rideStatus = response.data.ride?.status;
+                if (rideStatus === 'ongoing' || rideStatus === 'accepted') {
+                    setRide(response.data.ride);
+                    setConfirmRidePopupPanel(true);
+                } else if (rideStatus === 'started') {
+                    // If ride is already started, go to riding screen
+                    navigate('/captain-riding', { state: { ride: response.data.ride } });
+                } else {
+                    // Ride is not ongoing, clear localStorage
+                    localStorage.removeItem('ongoingRide');
+                    setRide(null);
+                    setConfirmRidePopupPanel(false);
+                }
+            } catch (err) {
+                localStorage.removeItem('ongoingRide');
+                setRide(null);
+                setConfirmRidePopupPanel(false);
+            }
+        };
+        fetchRideStatus();
+    }
+}, [navigate]);
+
+// Add click outside handler
+useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowAvailableRides(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
 const handleAcceptRide = async (selectedRide) => {
     try {
         const token = getToken('captain');
@@ -158,11 +213,19 @@ const handleAcceptRide = async (selectedRide) => {
             console.error('No captain token found');
             return;
         }
-
-        // Set the ride data first
-        setRide(selectedRide);
+        // Set the ride data first, ensuring distance is in meters
+        const rideWithDistance = {
+            ...selectedRide,
+            distance: typeof selectedRide.distance === 'number' ? Math.round(selectedRide.distance) : 0
+        };
+        setRide(rideWithDistance);
         setRidePopupPanel(false);
         setConfirmRidePopupPanel(true);
+        // Save to localStorage
+        localStorage.setItem('ongoingRide', JSON.stringify({ 
+            _id: selectedRide._id,
+            distance: rideWithDistance.distance 
+        }));
 
         const response = await axios.post(
             `${import.meta.env.VITE_BASE_URL}/rides/confirm`,
@@ -176,29 +239,30 @@ const handleAcceptRide = async (selectedRide) => {
                 }
             }
         );
-
         if (response.status === 200) {
-            // Emit ride-accepted event
             socket.emit('ride-accepted', { rideId: selectedRide._id });
-            
-            // Remove the accepted ride from available rides
             setAvailableRides(prev => {
                 const updatedRides = prev.filter(ride => ride._id !== selectedRide._id);
                 localStorage.setItem('availableRides', JSON.stringify(updatedRides));
                 return updatedRides;
             });
-
-            // Close the available rides panel
             setShowAvailableRides(false);
-            
-            // Update ride data with response data
-            setRide(response.data);
+            // Preserve the distance data from the selected ride
+            setRide({
+                ...response.data,
+                distance: rideWithDistance.distance // Keep the original distance in meters
+            });
+            // Update localStorage with full ride info
+            localStorage.setItem('ongoingRide', JSON.stringify({ 
+                _id: response.data._id,
+                distance: rideWithDistance.distance // Keep the original distance in meters
+            }));
         }
     } catch (error) {
         console.error('Error confirming ride:', error);
-        // Reset ride data on error
         setRide(null);
         setConfirmRidePopupPanel(false);
+        localStorage.removeItem('ongoingRide');
     }
 };
 
@@ -212,6 +276,12 @@ const handleRejectRide = (rideId) => {
     if (availableRides.length === 1) {
         setShowAvailableRides(false);
     }
+};
+
+const handleCancelOrComplete = () => {
+    localStorage.removeItem('ongoingRide');
+    setRide(null);
+    setConfirmRidePopupPanel(false);
 };
 
   useGSAP(()=>{
@@ -246,6 +316,15 @@ useGSAP(()=>{
     }
 },[confirmRidePopupPanel])
 
+// Save map type to localStorage when it changes
+useEffect(() => {
+    localStorage.setItem('captainMapType', mapType);
+}, [mapType]);
+
+const handleMapTypeChange = (newMapType) => {
+    setMapType(newMapType);
+};
+
   return (
     <div className="relative h-screen w-full">
       <div className='h-screen relative overflow-hidden bg-gray-50'>
@@ -259,6 +338,16 @@ useGSAP(()=>{
             <span className="text-2xl font-bold text-gray-900">MyTaxy</span>
           </div>
           <div className="flex items-center space-x-3">
+            {/* Map Type Toggle Button */}
+            <button 
+              onClick={() => setMapType(prev => prev === 'hybrid' ? 'roadmap' : 'hybrid')}
+              className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer'
+              title={mapType === 'hybrid' ? 'Switch to Map View' : 'Switch to Satellite View'}
+            >
+              <i className={`text-xl ri-${mapType === 'hybrid' ? 'map-2-line' : 'earth-line'}`}></i>
+            </button>
+            {/* Available Rides Button with Dropdown */}
+            <div className="relative" ref={dropdownRef}>
             <button 
               onClick={() => setShowAvailableRides(!showAvailableRides)}
               className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer relative'
@@ -270,6 +359,142 @@ useGSAP(()=>{
                 </span>
               )}
             </button>
+
+              {/* Available Rides Dropdown */}
+              {showAvailableRides && (
+                <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-100 transform transition-all duration-200 ease-out z-50">
+                  {/* Header */}
+                  <div className="p-3 border-b border-gray-100">
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center gap-2">
+                        <div className="h-6 w-6 rounded-full bg-yellow-100 flex items-center justify-center">
+                          <i className="ri-route-line text-yellow-600"></i>
+                        </div>
+                        <h2 className="font-medium text-gray-800">Available Rides</h2>
+                      </div>
+                      <button 
+                        onClick={() => setShowAvailableRides(false)}
+                        className="h-6 w-6 bg-gray-100 hover:bg-gray-200 rounded-full flex items-center justify-center transition-colors cursor-pointer"
+                      >
+                        <i className="ri-close-line text-sm text-gray-600"></i>
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500 ml-8">Tap to accept a ride</p>
+                  </div>
+
+                  {/* Rides List with Custom Scrollbar */}
+                  <div className="max-h-[50vh] overflow-y-auto custom-scrollbar">
+                    <style jsx>{`
+                      .custom-scrollbar::-webkit-scrollbar {
+                        width: 4px;
+                      }
+                      .custom-scrollbar::-webkit-scrollbar-track {
+                        background: transparent;
+                        margin: 4px 0;
+                      }
+                      .custom-scrollbar::-webkit-scrollbar-thumb {
+                        background: #e5e7eb;
+                        border-radius: 4px;
+                        transition: all 0.2s ease;
+                      }
+                      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                        background: #d1d5db;
+                      }
+                      .custom-scrollbar {
+                        scrollbar-width: thin;
+                        scrollbar-color: #e5e7eb transparent;
+                      }
+                    `}</style>
+                    <div className="p-2 space-y-1.5">
+                      {availableRides.length === 0 ? (
+                        <div className="text-center py-4">
+                          <div className="h-10 w-10 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-2">
+                            <i className="ri-search-line text-lg text-yellow-600"></i>
+                          </div>
+                          <p className="text-gray-600 text-sm">No rides available</p>
+                        </div>
+                      ) : (
+                        availableRides.map((ride) => (
+                          <div 
+                            key={ride._id}
+                            className="bg-white rounded-lg border border-gray-100 hover:border-yellow-200 hover:shadow-sm transition-all duration-200"
+                          >
+                            <div className="p-2.5">
+                              {/* User Info and Ride Summary */}
+                              <div className="flex items-center gap-2.5">
+                                {ride?.user?.profilePhoto ? (
+                                  <img 
+                                    src={ride.user.profilePhoto} 
+                                    alt={ride.user.fullname?.firstname || 'User'} 
+                                    className="h-9 w-9 rounded-full object-cover border border-yellow-100"
+                                  />
+                                ) : (
+                                  <div className="h-9 w-9 rounded-full bg-yellow-100 flex items-center justify-center border border-yellow-200">
+                                    <span className="text-sm font-semibold text-yellow-600">
+                                      {ride?.user?.fullname?.firstname?.charAt(0).toUpperCase() || 'U'}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between">
+                                    <h3 className="font-medium text-gray-900 text-sm truncate">
+                                      {ride?.user?.fullname?.firstname || 'User'}
+                                    </h3>
+                                    <span className="text-sm font-medium text-yellow-600">
+                                      ₹{ride?.fare}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-yellow-50 text-yellow-700">
+                                      <i className="ri-map-pin-line mr-0.5"></i>
+                                      {typeof ride?.distance === 'number' ? `${Math.round(ride.distance)} KM` : 'N/A'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Ride Details */}
+                              <div className="mt-1.5 pl-11 space-y-0.5">
+                                <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                  <i className="ri-map-pin-2-fill text-yellow-500"></i>
+                                  <p className="truncate">{ride?.pickupAddress}</p>
+                                </div>
+                                <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                  <i className="ri-map-pin-2-fill text-green-500"></i>
+                                  <p className="truncate">{ride?.destinationAddress}</p>
+                                </div>
+                              </div>
+
+                              {/* Action Buttons */}
+                              <div className="flex gap-1.5 mt-2 pl-11">
+                                <button
+                                  onClick={() => handleRejectRide(ride._id)}
+                                  className="flex-1 py-1 px-2 bg-gray-100 text-gray-600 cursor-pointer rounded text-xs font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-1"
+                                >
+                                  <i className="ri-close-line"></i>
+                                  <span>Ignore</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    handleAcceptRide(ride);
+                                    setShowAvailableRides(false);
+                                  }}
+                                  className="flex-1 py-1 px-2 bg-yellow-500 text-white rounded cursor-pointer text-xs font-medium hover:bg-yellow-600 transition-colors flex items-center justify-center gap-1"
+                                >
+                                  <i className="ri-check-line"></i>
+                                  <span>Accept</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <Link 
               to='/captain-profile' 
               className='h-10 w-10 bg-white flex items-center justify-center rounded-full shadow-md hover:bg-gray-50 transition-colors text-gray-700 cursor-pointer'
@@ -285,39 +510,22 @@ useGSAP(()=>{
           </div>
         </div>
 
-        {/* Full screen map */}
+        {/* Map */}
         <div className='h-full w-full fixed top-0 left-0 z-0'>
-          <LiveTracking rideData={null} />
+          <LiveTracking 
+            rideData={null} 
+            mapType={mapType}
+            onMapTypeChange={handleMapTypeChange}
+          />
         </div>
 
         {/* Stats Section */}
         <div className='absolute bottom-0 inset-x-0 z-10 max-w-2xl mx-auto md:max-w-2xl md:mx-auto shadow-lg rounded-t-3xl overflow-hidden'>
-          <div className='p-6 bg-white'>
+          <div className='px-4 py-2 bg-white'>
+          <h3 className='text-lg font-semibold my-2 mb-4 text-gray-800 text-center'>Today's Performance</h3>
             <CaptainDetails/>
           </div>
         </div>
-
-        {/* Available Rides Panel */}
-        {showAvailableRides && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40">
-            <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-3xl p-6 max-h-[80vh] overflow-y-auto">
-              <div className="sticky top-0 bg-white/80 backdrop-blur-sm p-4 border-b flex justify-between items-center rounded-t-3xl z-50">
-                <h2 className="text-xl font-semibold text-gray-800">Available Rides</h2>
-                <button 
-                  onClick={() => setShowAvailableRides(false)}
-                  className="p-2 hover:bg-gray-100 rounded-full transition-colors cursor-pointer"
-                >
-                  <i className="ri-close-line text-xl"></i>
-                </button>
-              </div>
-              <AvailableRidesList 
-                rides={availableRides}
-                onAccept={handleAcceptRide}
-                onReject={handleRejectRide}
-              />
-            </div>
-          </div>
-        )}
 
         {/* Ride Popup Panel */}
         <div ref={ridePopupPanelRef} className='fixed w-full z-50 bottom-0 translate-y-full bg-white rounded-t-3xl shadow-lg px-6 py-8 md:max-w-2xl md:left-1/2 md:-translate-x-1/2'>
@@ -330,13 +538,16 @@ useGSAP(()=>{
         </div>
 
         {/* Confirm Ride Popup Panel */}
-        <div ref={confirmRidePopupPanelRef} className='fixed w-full z-50 h-screen bottom-0 translate-y-full bg-white rounded-t-3xl shadow-lg px-6 py-8 md:max-w-2xl md:left-1/2 md:-translate-x-1/2'>
+        {confirmRidePopupPanel && (
+          <div ref={confirmRidePopupPanelRef} className='fixed w-full z-50 bottom-0 left-0 right-0 translate-y-full bg-white rounded-t-3xl shadow-lg md:max-w-2xl md:mx-auto'>
           <ConfirmRidePopUp
             ride={ride}
             setConfirmRidePopupPanel={setConfirmRidePopupPanel} 
             setRidePopupPanel={setRidePopupPanel} 
+              onCancelOrComplete={handleCancelOrComplete}
           />
         </div>
+        )}
       </div>
     </div>
   )

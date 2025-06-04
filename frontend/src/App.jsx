@@ -20,25 +20,41 @@ import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 import { UserDataContext } from './context/UserContext'
 import { getToken } from './services/auth.service'
+import CustomToast from './components/CustomToast'
 
 const libraries = ['places', 'geometry']
 
 const App = () => {
   const { user } = useContext(UserDataContext)
-  const userToken = getToken('user')
-  const captainToken = getToken('captain')
+  const userToken = localStorage.getItem('token')
+  const captainToken = localStorage.getItem('captainToken')
 
   return (
     <LoadScript 
-    googleMapsApiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
+      googleMapsApiKey={import.meta.env.VITE_GOOGLE_MAPS_API_KEY}
       libraries={libraries}
-      loadingElement={<div>Loading...</div>}
+      loadingElement={
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
+      }
       onError={(error) => console.error('Error loading Google Maps:', error)}
     >
-      <div>
-      <ToastContainer position="top-center" autoClose={3000} />
-        <Routes>
-            <Route path='/' element={userToken ? <Navigate to="/home" /> : <UserLogin />}/>
+      <div className="min-h-screen bg-gray-50">
+        <ToastContainer 
+          position="top-center" 
+          autoClose={3000}
+          className="mt-16"
+          toastClassName="bg-white rounded-lg shadow-lg"
+        />
+        <CustomToast />
+        <main>
+          <Routes>
+            <Route path='/' element={
+              userToken ? <Navigate to="/home" /> :
+              captainToken ? <Navigate to="/captain-home" /> :
+              <UserLogin />
+            }/>
             <Route path='/login' element={<UserLogin/>}/>
             <Route path='/signup' element={<UserSignup/>}/>
             <Route path='/captain-login' element={<CaptainLogin/>}/>
@@ -82,7 +98,8 @@ const App = () => {
                 <CaptainProfile/>
               </CaptainProtectWrapper>
             }/>
-        </Routes>
+          </Routes>
+        </main>
       </div>
     </LoadScript>
   )

@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { getToken } from '../src/services/auth.service';
+import PaymentReceipt from './PaymentReceipt';
+import { showToast } from '../src/components/CustomToast';
 
 const Payment = ({ rideData, onPaymentSuccess, onPaymentFailure }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const [razorpayLoaded, setRazorpayLoaded] = useState(false);
+    const [showReceipt, setShowReceipt] = useState(false);
+    const [paymentId, setPaymentId] = useState(null);
+    const navigate = useNavigate();
 
     // Load Razorpay script on component mount
     useEffect(() => {
@@ -88,7 +94,7 @@ const Payment = ({ rideData, onPaymentSuccess, onPaymentFailure }) => {
                 key: import.meta.env.VITE_RAZORPAY_KEY_ID,
                 amount: orderResponse.data.amount,
                 currency: orderResponse.data.currency,
-                name: 'RideUber',
+                name: 'MyTaxy',
                 description: `Payment for ride #${rideData._id}`,
                 order_id: orderResponse.data.id,
                 prefill: {
@@ -120,13 +126,17 @@ const Payment = ({ rideData, onPaymentSuccess, onPaymentFailure }) => {
                         console.log('Payment verification response:', verifyResponse.data);
 
                         if (verifyResponse.data.success) {
+                            setPaymentId(response.razorpay_payment_id);
+                            setShowReceipt(true);
                             onPaymentSuccess(verifyResponse.data);
+                            showToast.success('Payment successful!');
                         } else {
                             throw new Error('Payment verification failed');
                         }
                     } catch (error) {
                         console.error('Payment verification error:', error);
                         onPaymentFailure('Payment verification failed');
+                        showToast.error('Payment verification failed');
                     }
                 },
                 modal: {
@@ -145,6 +155,7 @@ const Payment = ({ rideData, onPaymentSuccess, onPaymentFailure }) => {
             console.error('Payment error:', error);
             setError(error.message || 'Payment initialization failed');
             onPaymentFailure(error.message || 'Payment initialization failed');
+            showToast.error(error.message || 'Payment initialization failed');
         } finally {
             setIsLoading(false);
         }
@@ -177,6 +188,16 @@ const Payment = ({ rideData, onPaymentSuccess, onPaymentFailure }) => {
                 <p className="mt-2 text-sm text-yellow-600">
                     Loading payment gateway...
                 </p>
+            )}
+            
+            {showReceipt && paymentId && (
+                <PaymentReceipt
+                    paymentId={paymentId}
+                    onClose={() => {
+                        setShowReceipt(false);
+                        navigate('/rides');
+                    }}
+                />
             )}
         </div>
     );

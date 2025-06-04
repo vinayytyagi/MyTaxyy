@@ -1,10 +1,19 @@
-const captainModel=require('../models/captain.model');
+// Captain Service: Handles captain (driver) related operations
+// This service manages captain registration and profile management
 
-module.exports.createCaptain=async({firstname,lastname,email,password,phone,color,plate,capacity,vehicleType})=>{
+const captainModel = require('../models/captain.model');
 
+// Create a new captain account
+// Used when a new driver signs up through the app
+module.exports.createCaptain = async ({
+    firstname, lastname, email, password, phone, color, plate, capacity, vehicleType
+}) => {
+    // Validate required fields
     if (!firstname || !email || !password || !phone || !color || !plate || !capacity || !vehicleType) {
         throw new Error('All fields are required');
     }
+
+    // Create new captain in database with default location
     const captain = captainModel.create({
         fullname: {
             firstname,
@@ -23,7 +32,7 @@ module.exports.createCaptain=async({firstname,lastname,email,password,phone,colo
             type: "Point",
             coordinates: [0, 0] // Default coordinates, will be updated when captain starts driving
         }
-    })
+    });
 
     return captain;
 }

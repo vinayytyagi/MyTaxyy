@@ -95,7 +95,7 @@ const RideDetails = ({ rideData, onRideComplete }) => {
             {currentRide?.status === 'completed' && currentRide?.paymentStatus === 'completed' && (
                 <div className="mt-4 p-4 bg-green-50 rounded-md">
                     <p className="text-green-600">Payment completed successfully!</p>
-                    <p className="text-sm text-gray-600 mt-2">Thank you for using RideUber!</p>
+                    <p className="text-sm text-gray-600 mt-2">Thank you for using MyTaxy!</p>
                 </div>
             )}
         </div>

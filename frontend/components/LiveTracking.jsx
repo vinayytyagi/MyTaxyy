@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useContext, useRef } from 'react';
-import { GoogleMap, Marker, Polyline,Circle } from '@react-google-maps/api';
+import React, { useState, useEffect, useContext, useRef, useCallback } from 'react';
+import { GoogleMap, Marker, Polyline, Circle, useLoadScript } from '@react-google-maps/api';
 import { SocketContext } from '../src/context/SocketContext';
 import axios from 'axios'; // Required for fetching route
+import { getToken } from '../src/services/auth.service';
 
 const containerStyle = {
     width: '100%',
     height: '100%',
+    position: 'relative',
+    top: 0,
+    left: 0
 };
 
 const DEFAULT_CENTER = { lat: 28.6139, lng: 77.2090 };
@@ -23,15 +27,26 @@ const isValidCoordinate = (coord) => {
         coord.lng <= 180;
 };
 
-const LiveTracking = ({ rideData }) => {
+const LiveTracking = ({ rideData, onRouteDetails, mapType = 'hybrid', onMapTypeChange }) => {
     const [currentPosition, setCurrentPosition] = useState(null);
     const [driverPosition, setDriverPosition] = useState(null);
     const [routePath, setRoutePath] = useState([]);
+    const [routeDetails, setRouteDetails] = useState(null);
+    const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
     const { socket } = useContext(SocketContext);
     const mapRef = useRef(null);
-    const [mapType, setMapType] = useState('satellite');
     const [mapInstance, setMapInstance] = useState(null);
     const [isFullscreen, setIsFullscreen] = useState(false);
+
+    // Add resize listener to check for mobile
+    useEffect(() => {
+        const handleResize = () => {
+            setIsMobile(window.innerWidth < 768);
+        };
+
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     // Get current location
     useEffect(() => {
@@ -78,11 +93,6 @@ const LiveTracking = ({ rideData }) => {
                 return;
             }
 
-            // console.log('Fetching route with coordinates:', {
-            //     pickup: rideData.pickup,
-            //     destination: rideData.destination
-            // });
-
             const directionsService = new window.google.maps.DirectionsService();
 
             directionsService.route(
@@ -92,9 +102,6 @@ const LiveTracking = ({ rideData }) => {
                     travelMode: window.google.maps.TravelMode.DRIVING,
                 },
                 (result, status) => {
-                    // console.log('Directions API response:', result);
-                    // console.log('Directions API status:', status);
-                    
                     if (status === window.google.maps.DirectionsStatus.OK) {
                         if (!result.routes || result.routes.length === 0) {
                             console.error('No routes found in the response');
@@ -102,16 +109,12 @@ const LiveTracking = ({ rideData }) => {
                         }
 
                         const route = result.routes[0];
-                        // console.log('Route object:', route);
                         
                         if (!route.overview_polyline) {
                             console.error('No overview_polyline in the route');
                             return;
                         }
 
-                        // console.log('Overview polyline:', route.overview_polyline);
-                        
-                        // The overview_polyline is a string containing the encoded polyline
                         const encodedPolyline = route.overview_polyline;
 
                         if (!encodedPolyline) {
@@ -119,17 +122,24 @@ const LiveTracking = ({ rideData }) => {
                             return;
                         }
 
-                        // console.log('Encoded polyline:', encodedPolyline);
-
-                            // If points exist, decode the polyline path
-                            if (window.google?.maps?.geometry?.encoding) {
+                        if (window.google?.maps?.geometry?.encoding) {
                             try {
                                 const decodedPath = window.google.maps.geometry.encoding.decodePath(encodedPolyline);
-                                // console.log('Decoded path:', decodedPath);
                                 
                                 if (decodedPath && decodedPath.length > 0) {
-                                setRoutePath(decodedPath);
-                            } else {
+                                    setRoutePath(decodedPath);
+                                    
+                                    // Calculate and set route details
+                                    const distance = route.legs[0].distance.text;
+                                    const duration = route.legs[0].duration.text;
+                                    const details = { distance, duration };
+                                    setRouteDetails(details);
+                                    
+                                    // Pass route details to parent component
+                                    if (onRouteDetails) {
+                                        onRouteDetails(details);
+                                    }
+                                } else {
                                     console.error('Decoded path is empty');
                                 }
                             } catch (error) {
@@ -140,9 +150,6 @@ const LiveTracking = ({ rideData }) => {
                         }
                     } else {
                         console.error('Directions request failed with status:', status);
-                        if (status === window.google.maps.DirectionsStatus.ZERO_RESULTS) {
-                            console.error('No route found between the origin and destination.');
-                        }
                     }
                 }
             );
@@ -153,7 +160,7 @@ const LiveTracking = ({ rideData }) => {
         } else {
             console.error('Google Maps API not loaded');
         }
-    }, [rideData]);
+    }, [rideData, onRouteDetails]);
 
     useEffect(() => {
         if (routePath.length > 0) {
@@ -189,54 +196,99 @@ const LiveTracking = ({ rideData }) => {
         };
     }, []);
 
-    return (
-        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-            <GoogleMap
-                mapContainerStyle={containerStyle}
-                center={getMapCenter()}
-                zoom={15}
-                mapTypeId={mapType}
-                options={{
+    const mapOptions = {
                     disableDefaultUI: true,
-                    scaleControl: true,
-                    scaleControlOptions: {
-                        position: window.google.maps.ControlPosition.LEFT_BOTTOM
-                    },
+        zoomControl: false,
+        streetViewControl: true,
+        mapTypeControl: false,
                     styles: [
                         {
                             featureType: "poi",
                             elementType: "labels",
                             stylers: [{ visibility: "off" }]
-                        },
-                        {
-                            featureType: "transit",
-                            elementType: "labels",
-                            stylers: [{ visibility: "off" }]
+            }
+        ],
+        mapTypeId: mapType
+    };
+
+    // Add custom styles to position the street view control
+    useEffect(() => {
+        // Wait for the street view control to be added to the DOM
+        const checkForStreetViewControl = setInterval(() => {
+            const streetViewControl = document.querySelector('.gm-svpc');
+            if (streetViewControl) {
+                // Get the map container's position
+                const mapContainer = document.querySelector('.gm-style');
+                if (mapContainer) {
+                    // Position the street view control relative to the map container
+                    streetViewControl.style.position = 'fixed';
+                    streetViewControl.style.top = '80px';
+                    streetViewControl.style.left = '20px';
+                    streetViewControl.style.transform = 'none';
+                    streetViewControl.style.margin = '0';
+                    streetViewControl.style.zIndex = '9999';
+                    streetViewControl.style.pointerEvents = 'auto';
+                    
+                    // Force the control to stay on top
+                    const observer = new MutationObserver(() => {
+                        if (streetViewControl.style.top !== '80px') {
+                            streetViewControl.style.top = '80px';
+                            streetViewControl.style.left = '20px';
                         }
-                    ],
-                    mapTypeControl: false,
-                    mapTypeId: mapType
-                }}
-                onLoad={(map) => {
+                    });
+                    
+                    observer.observe(streetViewControl, { 
+                        attributes: true, 
+                        attributeFilter: ['style'] 
+                    });
+
+                    // Remove any other controls that might have appeared
+                    const otherControls = document.querySelectorAll('.gm-control-active, .gm-fullscreen-control');
+                    otherControls.forEach(control => control.remove());
+                    
+                    clearInterval(checkForStreetViewControl);
+                }
+            }
+        }, 100);
+
+        return () => clearInterval(checkForStreetViewControl);
+    }, []);
+
+    const onMapLoad = (map) => {
                     setMapInstance(map);
                     mapRef.current = map;
-                    map.setMapTypeId(mapType);
                     if (routePath.length > 0) {
                         const bounds = new window.google.maps.LatLngBounds();
                         routePath.forEach((point) => bounds.extend(point));
                         map.fitBounds(bounds);
                     }
-                }}
-                onUnmount={() => {
+    };
+
+    const onMapUnmount = () => {
                     mapRef.current = null;
                     setMapInstance(null);
-                }}
+    };
+
+    return (
+        <div style={{ 
+            width: '100%', 
+            height: '100%', 
+            position: 'relative',
+            overflow: 'hidden' // Prevent any scrolling issues
+        }}>
+            <GoogleMap
+                mapContainerStyle={containerStyle}
+                center={getMapCenter()}
+                zoom={15}
+                options={mapOptions}
+                onLoad={onMapLoad}
+                onUnmount={onMapUnmount}
             >
                 {currentPosition && (
                     <>
                         <Circle
                             center={currentPosition}
-                            radius={150}
+                            radius={500}
                             options={{
                                 fillColor: "#fdc700",
                                 fillOpacity: 0.15,
@@ -249,7 +301,7 @@ const LiveTracking = ({ rideData }) => {
                             position={currentPosition}
                             icon={{
                                 path: window.google.maps.SymbolPath.CIRCLE,
-                                scale: 10,
+                                scale: 15,
                                 fillColor: "#fdc700",
                                 fillOpacity: 1,
                                 strokeColor: "#ffffff",
@@ -263,7 +315,7 @@ const LiveTracking = ({ rideData }) => {
                     <>
                     <Circle
                             center={driverPosition}
-                            radius={150}
+                            radius={500}
                             options={{
                                 fillColor: "#fdc700",
                                 fillOpacity: 0.15,
@@ -291,12 +343,9 @@ const LiveTracking = ({ rideData }) => {
                     <Marker
                         position={rideData.pickup}
                         icon={{
-                            path: window.google.maps.SymbolPath.CIRCLE,
-                            scale: 10,
-                            fillColor: "#fdc700",
-                            fillOpacity: 1,
-                            strokeColor: "#ffffff",
-                            strokeWeight: 3,
+                            url: 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23fdc700"><path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.04 3H5.81l1.04-3zM19 17H5v-5h14v5z"/><circle cx="7.5" cy="14.5" r="1.5"/><circle cx="16.5" cy="14.5" r="1.5"/></svg>',
+                            scaledSize: new window.google.maps.Size(45, 45),
+                            anchor: new window.google.maps.Point(22.5, 22.5)
                         }}
                     />
                 )}
@@ -336,49 +385,6 @@ const LiveTracking = ({ rideData }) => {
                     />
                 )}
             </GoogleMap>
-
-            {/* Map Type Indicator with animation */}
-            <div 
-                onClick={() => {
-                    const newMapType = mapType === 'satellite' ? 'roadmap' : 'satellite';
-                    setMapType(newMapType);
-                    if (mapInstance) {
-                        mapInstance.setMapTypeId(newMapType);
-                    }
-                }}
-                style={{
-                    position: 'absolute',
-                    top: 80,
-                    left: 20,
-                    background: 'rgba(255, 255, 255, 0.95)',
-                    padding: '8px 16px',
-                    borderRadius: '12px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    zIndex: 10,
-                    backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(253, 199, 0, 0.2)',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s ease'
-                }}
-                className="hover:bg-gray-50 hover:scale-105"
-                title="Click to change map type"
-            >
-                <i className="ri-map-2-line" style={{ 
-                    color: '#fdc700',
-                    fontSize: '18px'
-                }}></i>
-                <span style={{ 
-                    color: '#1a1a1a', 
-                    fontWeight: 500,
-                    fontSize: '14px',
-                    textTransform: 'capitalize'
-                }}>
-                    {mapType === 'satellite' ? 'Satellite View' : 'Map View'}
-                </span>
-            </div>
 
             {/* Minimize Button with pulse effect */}
             {isFullscreen && (
@@ -441,8 +447,6 @@ const LiveTracking = ({ rideData }) => {
                         justifyContent: 'center',
                         boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                         cursor: 'pointer',
-                        // position: 'absolute',
-                        // top: -100,
                         right: 0,
                         transition: 'all 0.3s ease'
                     }}
@@ -474,7 +478,6 @@ const LiveTracking = ({ rideData }) => {
                         }
                     }}
                     style={{
-                            // background: 'gray',
                             border: '2px solid #fdc700',
                             color: 'gray',
                         borderRadius: '50%',
@@ -544,42 +547,6 @@ const LiveTracking = ({ rideData }) => {
             >
                 <i className="ri-crosshair-2-line" style={{ fontSize: 22, color: '#ffffff' }}></i>
             </button>
-
-            {/* Distance and ETA Info (if route exists) */}
-            {routePath.length > 0 && (
-                <div style={{
-                    position: 'absolute',
-                    bottom: '20px',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    background: 'rgba(255, 255, 255, 0.95)',
-                    padding: '12px 24px',
-                    borderRadius: '16px',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '16px',
-                    zIndex: 10,
-                    backdropFilter: 'blur(8px)',
-                    border: '1px solid rgba(253, 199, 0, 0.2)',
-                    maxWidth: '90%',
-                    margin: '0 auto'
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <i className="ri-route-line" style={{ color: '#fdc700', fontSize: '20px' }}></i>
-                        <span style={{ color: '#1a1a1a', fontWeight: 500 }}>2.5 km</span>
-                    </div>
-                    <div style={{ 
-                        width: '1px', 
-                        height: '24px', 
-                        background: 'rgba(0,0,0,0.1)' 
-                    }}></div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <i className="ri-time-line" style={{ color: '#fdc700', fontSize: '20px' }}></i>
-                        <span style={{ color: '#1a1a1a', fontWeight: 500 }}>8 min</span>
-                    </div>
-                </div>
-            )}
         </div>
     );
 };

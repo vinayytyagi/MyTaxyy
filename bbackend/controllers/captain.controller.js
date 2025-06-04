@@ -5,6 +5,8 @@ const blacklistTokenModel = require('../models/blacklistToken.model');
 const cloudinary = require('../config/cloudinary.config');
 const fs = require('fs');
 const path = require('path');
+const CaptainDailyStats = require('../models/CaptainDailyStats');
+const rideModel = require('../models/ride.model');
 
 module.exports.registerCaptain=async(req,res,next)=>{
     const errors=validationResult(req);
@@ -201,5 +203,80 @@ module.exports.updateCaptainProfile = async (req, res, next) => {
             message: 'Error updating profile',
             error: error.message 
         });
+    }
+};
+
+// Get captain's daily stats
+module.exports.getDailyStats = async (req, res) => {
+    try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        let stats = await CaptainDailyStats.findOne({
+            captainId: req.captain._id,
+            date: today
+        });
+
+        if (!stats) {
+            // Create new stats for today if none exists
+            stats = await CaptainDailyStats.create({
+                captainId: req.captain._id,
+                date: today
+            });
+        }
+
+        // Convert rideTime from minutes to hours for frontend
+        const statsForFrontend = {
+            earnings: stats.earnings,
+            rides: stats.rides,
+            rideTime: stats.rideTime / 60, // Convert to hours
+            acceptance: Math.round(stats.acceptanceRate)
+        };
+
+        res.json(statsForFrontend);
+    } catch (error) {
+        console.error('Error getting daily stats:', error);
+        res.status(500).json({ message: 'Error fetching daily stats' });
+    }
+};
+
+// Reset captain's daily stats
+module.exports.resetDailyStats = async (req, res) => {
+    try {
+        await CaptainDailyStats.resetStats(req.captain._id);
+        res.json({ message: 'Daily stats reset successfully' });
+    } catch (error) {
+        console.error('Error resetting daily stats:', error);
+        res.status(500).json({ message: 'Error resetting daily stats' });
+    }
+};
+
+// Add function to ignore a ride
+module.exports.ignoreRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+    const captainId = req.captain._id;
+
+    try {
+        const ride = await rideModel.findById(rideId);
+
+        if (!ride) {
+            return res.status(404).json({ message: 'Ride not found' });
+        }
+
+        // Add captain's ID to ignoredBy array if not already present
+        if (!ride.ignoredBy.includes(captainId)) {
+            ride.ignoredBy.push(captainId);
+            await ride.save();
+        }
+
+        res.status(200).json({ message: 'Ride ignored successfully' });
+    } catch (error) {
+        console.error('Error ignoring ride:', error);
+        res.status(500).json({ message: 'Error ignoring ride' });
     }
 };
